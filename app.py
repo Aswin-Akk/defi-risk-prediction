@@ -475,7 +475,7 @@ elif page == "⛓️ Risk Prediction":
     )
 
     st.markdown(
-        '<div class="subtitle">Enter wallet behaviour and predict financial risk</div>',
+        '<div class="subtitle">Select a wallet from the dataset and predict financial risk</div>',
         unsafe_allow_html=True
     )
 
@@ -498,178 +498,145 @@ elif page == "⛓️ Risk Prediction":
 
 
     # --------------------------------------------------------
-    # INPUTS
+    # AUTOMATIC DATASET INPUT
     # --------------------------------------------------------
 
-    col1, col2, col3 = st.columns(3)
+    st.markdown("### 🔐 Wallet Behaviour from Dataset")
 
+    st.info(
+        "Select a wallet from the DeFi dataset. The 15 machine-learning "
+        "features are loaded automatically for prediction."
+    )
 
-    with col1:
+    wallet_options = (
+        df["wallet"]
+        .dropna()
+        .astype(str)
+        .drop_duplicates()
+        .tolist()
+    )
 
-        transaction_count = st.number_input(
-            "Transaction Count",
-            min_value=0,
-            value=10,
-            step=1
-        )
+    selected_wallet = st.selectbox(
+        "Select Wallet",
+        wallet_options,
+        index=0,
+        help="Choose a wallet record from defi_risk_dataset.csv."
+    )
 
-        borrow_count = st.number_input(
-            "Borrow Count",
-            min_value=0,
-            value=2,
-            step=1
-        )
+    selected_rows = df[df["wallet"].astype(str) == selected_wallet]
 
-        supply_count = st.number_input(
-            "Supply Count",
-            min_value=0,
-            value=2,
-            step=1
-        )
+    if selected_rows.empty:
+        st.error("Selected wallet was not found in the dataset.")
+        st.stop()
 
-        repay_count = st.number_input(
-            "Repay Count",
-            min_value=0,
-            value=1,
-            step=1
-        )
+    selected_row = selected_rows.iloc[0]
 
-        withdraw_count = st.number_input(
-            "Withdraw Count",
-            min_value=0,
-            value=1,
-            step=1
-        )
+    st.success("✅ Wallet data loaded automatically from the dataset.")
 
+    # Show the loaded behavioural features without asking the user to enter them.
+    display_features = [
+        "transaction_count",
+        "borrow_count",
+        "supply_count",
+        "repay_count",
+        "withdraw_count",
+        "liquidation_count",
+        "flashloan_count",
+        "failed_transaction_count",
+        "total_value",
+        "average_gas_used",
+        "average_gas_price",
+        "repayment_ratio",
+        "supply_borrow_ratio",
+        "withdraw_borrow_ratio",
+        "failed_transaction_ratio"
+    ]
 
-    with col2:
+    with st.expander("📊 View Automatically Loaded Wallet Features"):
+        feature_view = pd.DataFrame({
+            "Feature": display_features,
+            "Value": [selected_row[f] for f in display_features]
+        })
+        st.dataframe(feature_view, hide_index=True, width="stretch")
 
-        liquidation_count = st.number_input(
-            "Liquidation Count",
-            min_value=0,
-            value=0,
-            step=1
-        )
+    # Build model input directly from the selected dataset row.
+    input_data = pd.DataFrame([
+        {feature: selected_row[feature] for feature in FEATURES}
+    ])
 
-        flashloan_count = st.number_input(
-            "Flashloan Count",
-            min_value=0,
-            value=0,
-            step=1
-        )
+    # Clean the same way as training data.
+    input_data = input_data.replace([np.inf, -np.inf], np.nan)
+    input_data = input_data.fillna(df[FEATURES].median())
 
-        failed_transaction_count = st.number_input(
-            "Failed Transaction Count",
-            min_value=0,
-            value=0,
-            step=1
-        )
+    # --------------------------------------------------------
+    # LOAN & COLLATERAL MONITORING
+    # --------------------------------------------------------
 
-        total_value = st.number_input(
-            "Total Value",
+    st.markdown("### 🏦 Loan & Collateral Monitoring")
+
+    loan_col1, loan_col2, loan_col3 = st.columns(3)
+
+    with loan_col1:
+        collateral_value = st.number_input(
+            "Collateral Value",
             min_value=0.0,
-            value=0.0,
-            step=100.0
+            value=150000.0,
+            step=1000.0
         )
 
-        average_gas_used = st.number_input(
-            "Average Gas Used",
+    with loan_col2:
+        borrowed_amount = st.number_input(
+            "Borrowed Amount",
             min_value=0.0,
-            value=300000.0,
-            step=10000.0
+            value=100000.0,
+            step=1000.0
         )
 
-
-    with col3:
-
-        average_gas_price = st.number_input(
-            "Average Gas Price",
-            min_value=0.0,
-            value=2.5e10,
-            format="%.2e"
+    with loan_col3:
+        liquidation_threshold = st.number_input(
+            "Liquidation Threshold",
+            min_value=0.50,
+            max_value=0.95,
+            value=0.80,
+            step=0.05
         )
 
-        repayment_ratio = st.number_input(
-            "Repayment Ratio",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.30,
-            step=0.01
-        )
+    health_factor = None
 
-        supply_borrow_ratio = st.number_input(
-            "Supply / Borrow Ratio",
-            min_value=0.0,
-            value=1.0,
-            step=0.10
-        )
+    if borrowed_amount > 0:
+        health_factor = (
+            collateral_value * liquidation_threshold
+        ) / borrowed_amount
 
-        withdraw_borrow_ratio = st.number_input(
-            "Withdraw / Borrow Ratio",
-            min_value=0.0,
-            value=0.50,
-            step=0.10
-        )
+        h1, h2 = st.columns(2)
 
-        failed_transaction_ratio = st.number_input(
-            "Failed Transaction Ratio",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.05,
-            step=0.01
-        )
+        with h1:
+            st.metric("Collateral Health Factor", f"{health_factor:.2f}")
 
+        with h2:
+            if health_factor > 1.20:
+                st.success("🟢 SAFE: Collateral position is currently healthy.")
+            elif health_factor >= 1.00:
+                st.warning("🟡 WARNING: Collateral is approaching the liquidation threshold.")
+            else:
+                st.error("🔴 HIGH RISK: Collateral is below the liquidation threshold.")
+    else:
+        st.info("Enter a borrowed amount to calculate the Health Factor.")
 
     st.markdown("<br>", unsafe_allow_html=True)
-
 
     # --------------------------------------------------------
     # PREDICT BUTTON
     # --------------------------------------------------------
 
     predict_button = st.button(
-        "🔍 ANALYSE DEFI RISK",
+        "🔍 ANALYSE LOAN & DEFI RISK",
         type="primary",
         width="stretch"
     )
 
 
     if predict_button:
-
-        input_data = pd.DataFrame([{
-
-            "transaction_count": transaction_count,
-
-            "borrow_count": borrow_count,
-
-            "supply_count": supply_count,
-
-            "repay_count": repay_count,
-
-            "withdraw_count": withdraw_count,
-
-            "liquidation_count": liquidation_count,
-
-            "flashloan_count": flashloan_count,
-
-            "failed_transaction_count": failed_transaction_count,
-
-            "total_value": total_value,
-
-            "average_gas_used": average_gas_used,
-
-            "average_gas_price": average_gas_price,
-
-            "repayment_ratio": repayment_ratio,
-
-            "supply_borrow_ratio": supply_borrow_ratio,
-
-            "withdraw_borrow_ratio": withdraw_borrow_ratio,
-
-            "failed_transaction_ratio": failed_transaction_ratio
-
-        }])
-
 
         # ----------------------------------------------------
         # PREDICTION
@@ -695,16 +662,35 @@ elif page == "⛓️ Risk Prediction":
             high_probability = 0.0
 
 
-        # Risk score
-
+        # Risk score from the Random Forest model
         risk_score = high_probability * 100
 
+        # ----------------------------------------------------
+        # OVERALL RISK
+        # ----------------------------------------------------
+        # Random Forest = DeFi wallet behaviour risk
+        # Health Factor = current loan/collateral risk
+        # Overall Risk combines both signals without changing
+        # the original Random Forest prediction.
+
+        overall_risk = prediction
+
+        if health_factor is not None:
+            if health_factor < 1.00:
+                overall_risk = "High"
+            elif health_factor <= 1.20 and prediction == "Low":
+                overall_risk = "Medium"
 
         # ----------------------------------------------------
         # RESULT
         # ----------------------------------------------------
 
         st.divider()
+
+        st.markdown(
+            f"**Analysed Wallet:** `{selected_wallet}`",
+            unsafe_allow_html=True
+        )
 
         st.markdown("### 🛡️ Risk Assessment Result")
 
@@ -715,7 +701,7 @@ elif page == "⛓️ Risk Prediction":
         with r1:
 
             st.metric(
-                "Risk Score",
+                "ML Risk Score",
                 f"{risk_score:.2f} / 100"
             )
 
@@ -723,16 +709,16 @@ elif page == "⛓️ Risk Prediction":
         with r2:
 
             st.metric(
-                "Predicted Risk",
-                prediction
+                "Overall Risk",
+                overall_risk
             )
 
 
         with r3:
 
             st.metric(
-                "High Risk Probability",
-                f"{high_probability * 100:.2f}%"
+                "Health Factor",
+                f"{health_factor:.2f}" if health_factor is not None else "N/A"
             )
 
 
@@ -759,7 +745,7 @@ elif page == "⛓️ Risk Prediction":
                     },
 
                     title={
-                        "text": "DeFi Risk Score"
+                        "text": "ML DeFi Risk Score"
                     },
 
                     gauge={
@@ -809,10 +795,28 @@ elif page == "⛓️ Risk Prediction":
 
         with result_col:
 
-            if prediction == "High":
+            if overall_risk == "High":
+
+                if health_factor is not None and health_factor < 1.00:
+                    risk_message = (
+                        f"The current loan position is high risk because "
+                        f"the Health Factor is {health_factor:.2f}, below 1.00."
+                    )
+                    action_message = (
+                        "Add collateral or reduce the outstanding borrowing."
+                    )
+                else:
+                    risk_message = (
+                        "The Random Forest detected behavioural patterns "
+                        "associated with high DeFi financial risk."
+                    )
+                    action_message = (
+                        "Review borrowing, repayment, liquidation and "
+                        "failed transaction activity."
+                    )
 
                 st.markdown(
-                    """
+                    f"""
                     <div class="high-card">
 
                     <h2>🔴 HIGH RISK</h2>
@@ -821,13 +825,12 @@ elif page == "⛓️ Risk Prediction":
 
                     <br><br>
 
-                    The model detected behavioural patterns
-                    associated with high DeFi financial risk.
+                    {risk_message}
 
                     <br><br>
 
-                    Review borrowing, repayment,
-                    liquidation and failed transaction activity.
+                    <b>Recommended Action:</b><br>
+                    {action_message}
 
                     </div>
                     """,
@@ -835,10 +838,28 @@ elif page == "⛓️ Risk Prediction":
                 )
 
 
-            elif prediction == "Medium":
+            elif overall_risk == "Medium":
+
+                if health_factor is not None and health_factor <= 1.20:
+                    risk_message = (
+                        f"The loan position requires monitoring because "
+                        f"the Health Factor is {health_factor:.2f}."
+                    )
+                    action_message = (
+                        "Maintain a safety buffer, monitor collateral value, "
+                        "and avoid unnecessary additional borrowing."
+                    )
+                else:
+                    risk_message = (
+                        "The model detected moderate-risk DeFi behavioural patterns."
+                    )
+                    action_message = (
+                        "Monitor borrowing, withdrawals, repayment and "
+                        "transaction failures."
+                    )
 
                 st.markdown(
-                    """
+                    f"""
                     <div class="medium-card">
 
                     <h2>🟠 MEDIUM RISK</h2>
@@ -847,13 +868,12 @@ elif page == "⛓️ Risk Prediction":
 
                     <br><br>
 
-                    The model detected moderate-risk
-                    behavioural patterns.
+                    {risk_message}
 
                     <br><br>
 
-                    Monitor borrowing, withdrawals,
-                    repayment and transaction failures.
+                    <b>Recommended Action:</b><br>
+                    {action_message}
 
                     </div>
                     """,
@@ -869,16 +889,16 @@ elif page == "⛓️ Risk Prediction":
 
                     <h2>🟢 LOW RISK</h2>
 
-                    <b>Relatively healthy behaviour.</b>
+                    <b>Relatively healthy position.</b>
 
                     <br><br>
 
-                    The model detected relatively healthy
-                    DeFi behavioural patterns.
+                    The current loan position and DeFi behavioural
+                    patterns do not indicate elevated risk.
 
                     <br><br>
 
-                    Continue monitoring wallet activity.
+                    Continue monitoring collateral and wallet activity.
 
                     </div>
                     """,
@@ -1058,6 +1078,43 @@ elif page == "⛓️ Risk Prediction":
                 f"""
                 <div class="recommendation">
                 ✓ {recommendation}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+        if health_factor is not None:
+            if health_factor > 1.20:
+                loan_recommendation = (
+                    "Collateral position is healthy. Continue monitoring the "
+                    "collateral-to-debt ratio."
+                )
+
+            elif health_factor >= 1.00:
+                loan_recommendation = (
+                    "Collateral is approaching the liquidation threshold. "
+                    "Consider maintaining a safety buffer and avoid unnecessary "
+                    "additional borrowing."
+                )
+
+            else:
+                required_collateral = borrowed_amount / liquidation_threshold
+                additional_collateral = max(
+                    required_collateral - collateral_value,
+                    0.0
+                )
+
+                loan_recommendation = (
+                    f"Collateral is below the liquidation threshold. "
+                    f"Consider adding approximately "
+                    f"₹{additional_collateral:,.2f} collateral or reducing "
+                    f"the outstanding borrowing."
+                )
+
+            st.markdown(
+                f"""
+                <div class="recommendation">
+                ✓ {loan_recommendation}
                 </div>
                 """,
                 unsafe_allow_html=True
